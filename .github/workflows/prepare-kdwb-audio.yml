@@ -11,6 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install audio converter
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
       - name: Prepare office ambience source
         run: |
           curl -fsSL --retry 3 'https://cdn.freesound.org/previews/534/534123_7724198-hq.mp3' -o /tmp/kdwb-office.mp3
