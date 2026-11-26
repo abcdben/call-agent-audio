@@ -1,0 +1,77 @@
+name: Prepare KDWB audio
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and balance CC0 audio
+        run: |
+          python3 <<'PY'
+          import array, math, urllib.request, wave
+
+          assets = [
+              ("https://sfxmint.com/dl/quiet-office-desk-activity-ambience-01.wav", "kdwb-office-studio-loop-v1.wav", -42.0, -6.0),
+              ("https://sfxmint.com/dl/air-horn-02.wav", "kdwb-sfx-stadium-horn-v1.wav", -24.0, -6.0),
+              ("https://sfxmint.com/dl/dun-dun-dun-07.wav", "kdwb-sfx-guitar-sting-v1.wav", -24.0, -6.0),
+              ("https://sfxmint.com/dl/toilet-flush-01.wav", "kdwb-sfx-toilet-flush-v1.wav", -24.0, -6.0),
+              ("https://sfxmint.com/dl/drum-roll-02.wav", "kdwb-sfx-drum-roll-v1.wav", -24.0, -6.0),
+              ("https://sfxmint.com/dl/growth-41f04b2be34295a1012ef2ff-retry.wav", "kdwb-sfx-applause-v1.wav", -24.0, -6.0),
+              ("https://sfxmint.com/dl/basketball-buzzer-01.wav", "kdwb-sfx-buzzer-v1.wav", -24.0, -6.0),
+          ]
+
+          for source, filename, target_rms_db, peak_cap_db in assets:
+              request = urllib.request.Request(source, headers={"User-Agent": "Mozilla/5.0"})
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  source_data = response.read()
+              with open(filename, "wb") as raw:
+                  raw.write(source_data)
+              with wave.open(filename, "rb") as source_wav:
+                  params = source_wav.getparams()
+                  if params.sampwidth != 2:
+                      raise RuntimeError(f"{filename}: expected 16-bit WAV, got {params.sampwidth * 8}-bit")
+                  samples = array.array("h", source_wav.readframes(params.nframes))
+              rms = math.sqrt(sum(sample * sample for sample in samples) / len(samples))
+              peak = max(abs(sample) for sample in samples)
+              target_rms = 32768 * (10 ** (target_rms_db / 20))
+              peak_cap = 32768 * (10 ** (peak_cap_db / 20))
+              gain = min(target_rms / rms, peak_cap / peak)
+              for index, sample in enumerate(samples):
+                  samples[index] = max(-32768, min(32767, round(sample * gain)))
+              with wave.open(filename, "wb") as output_wav:
+                  output_wav.setparams(params)
+                  output_wav.writeframes(samples.tobytes())
+              final_rms = math.sqrt(sum(sample * sample for sample in samples) / len(samples))
+              final_peak = max(abs(sample) for sample in samples)
+              print(f"{filename}: rms={20*math.log10(final_rms/32768):.1f} dBFS peak={20*math.log10(final_peak/32768):.1f} dBFS")
+          PY
+      - name: Record CC0 sources
+        run: |
+          cat > KDWB-AUDIO-SOURCES.md <<'EOF'
+          # KDWB audio sources
+
+          These files are CC0 1.0 public-domain audio from SFXMint, volume-balanced for phone playback:
+
+          - `kdwb-office-studio-loop-v1.wav`: Quiet Office Desk Activity Ambience 01
+          - `kdwb-sfx-stadium-horn-v1.wav`: Stadium Air Horn 02
+          - `kdwb-sfx-guitar-sting-v1.wav`: Guitar Dun Dun Dun 07
+          - `kdwb-sfx-toilet-flush-v1.wav`: Swirling Water Toilet Flush 01
+          - `kdwb-sfx-drum-roll-v1.wav`: Cymbal Crash Drum Roll 02
+          - `kdwb-sfx-applause-v1.wav`: Applause
+          - `kdwb-sfx-buzzer-v1.wav`: Basketball Buzzer 01
+
+          Source site: https://sfxmint.com/ — CC0 1.0, no attribution required.
+          EOF
+      - name: Commit audio assets
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kdwb-*.wav KDWB-AUDIO-SOURCES.md
+          git commit --trailer "Co-authored-by: Cursor <cursoragent@cursor.com>" -m "Add balanced KDWB studio ambience and soundboard effects"
+          git push
